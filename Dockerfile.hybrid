@@ -24,8 +24,9 @@ RUN pip install --no-cache-dir \
     fastembed==0.3.4 \
     requests
 
-# Copy application (choose which main file to use)
-COPY ${MAIN_FILE:-main.py} main.py
+# Copy application (use main_hybrid.py or main.py based on MODE)
+COPY main.py main_sparse.py
+COPY main_hybrid.py .
 
 # Create cache directory
 RUN mkdir -p /cache && chmod 777 /cache
@@ -43,9 +44,17 @@ EXPOSE ${PORT:-8080}
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
     CMD python -c "import requests; requests.get('http://localhost:${PORT:-8080}/health', timeout=3)" || exit 1
 
-# Use environment variables for all settings
-CMD uvicorn main:app \
-    --host ${HOST:-0.0.0.0} \
-    --port ${PORT:-8080} \
-    --workers ${WORKERS:-1} \
-    --log-level ${LOG_LEVEL:-info}
+# Use MODE env var to switch between sparse-only and hybrid
+CMD if [ "${MODE}" = "hybrid" ]; then \
+        uvicorn main_hybrid:app \
+        --host ${HOST:-0.0.0.0} \
+        --port ${PORT:-8080} \
+        --workers ${WORKERS:-1} \
+        --log-level ${LOG_LEVEL:-info}; \
+    else \
+        uvicorn main:app \
+        --host ${HOST:-0.0.0.0} \
+        --port ${PORT:-8080} \
+        --workers ${WORKERS:-1} \
+        --log-level ${LOG_LEVEL:-info}; \
+    fi

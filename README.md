@@ -1,31 +1,51 @@
 # BM25 Sparse Vector API
 
-Lightweight HTTP service for generating BM25 sparse vectors using FastEmbed. Designed to work alongside Qdrant or any vector database supporting sparse vectors.
+Flexible HTTP service for generating BM25 sparse vectors and optional dense embeddings using FastEmbed. Supports three deployment modes: **Sparse-Only**, **Dense-Only**, and **Hybrid Search**.
 
 ## Features
 
-- 🚀 Fast BM25 sparse vector generation
-- 🔧 RESTful API with FastAPI
-- 🐳 Production-ready Docker setup
-- 💾 Model caching for performance
-- 🔒 Resource-limited deployment
-- 🏥 Built-in health checks with auto-restart
-- ⚙️ Fully configurable via environment variables
-- 🔄 Never-die policy with unlimited restart attempts
-- 👤 Non-root user execution for security
+- 🚀 **Multiple Modes**: Sparse-only (119MB), Dense-only, or Hybrid search
+- 💾 **Memory Optimized**: Dense models only loaded when enabled
+- 🌍 **Multilingual**: Excellent Russian, Chinese, English support
+- 🔧 **Production Ready**: FastAPI with health checks and auto-restart
+- ⚙️ **Fully Configurable**: All settings via environment variables
+- 🔐 **Optional Security**: Bearer token authentication
+- 🐳 **Docker Optimized**: Resource limits adjust to deployment mode
 
-## Quick Start
+## Deployment Modes
+
+### 🎯 **Mode 1: Sparse-Only (Default)**
+**Memory**: ~119MB | **Startup**: 5-10s | **Use Case**: BM25/keyword search only
 
 ```bash
-# Clone repository
-git clone <your-repo>
-cd qdrant-bm25
-
-# Start service
+# Default mode - most memory efficient
 docker-compose up -d
 
-# Check health
+# Memory usage verified: 119MB
 curl http://localhost:8080/health
+```
+
+### 🧠 **Mode 2: Dense-Only** 
+**Memory**: 800MB-3GB | **Startup**: 30-60s | **Use Case**: Semantic search only
+
+```bash
+# Enable dense embeddings, disable sparse
+ENABLE_DENSE=true DENSE_MODEL=BAAI/bge-small-en-v1.5 docker-compose up -d
+
+# Available endpoints: /dense/embed
+curl http://localhost:8080/dense/embed -H "Content-Type: application/json" -d '{"texts": ["Hello world"]}'
+```
+
+### 🔄 **Mode 3: Hybrid Search**
+**Memory**: 800MB-3GB | **Startup**: 30-60s | **Use Case**: Best of both worlds
+
+```bash
+# Enable both sparse and dense
+ENABLE_DENSE=true DENSE_MODEL=BAAI/bge-small-en-v1.5 docker-compose up -d
+
+# Get both vector types in one call
+curl http://localhost:8080/hybrid/embed -H "Content-Type: application/json" \
+  -d '{"texts": ["Hello world"], "include_sparse": true, "include_dense": true}'
 ```
 
 ## API Endpoints
@@ -39,14 +59,22 @@ Health check endpoint
 ```
 
 ### `POST /sparse/bm25`
-Generate BM25 sparse vectors
+Generate BM25 sparse vectors (always available)
+
+### `POST /dense/embed`
+Generate dense embeddings (only when `ENABLE_DENSE=true`)
+
+### `POST /hybrid/embed`  
+Generate both sparse and dense embeddings (only when `ENABLE_DENSE=true`)
 
 **Request:**
 ```json
 {
   "texts": ["text 1", "text 2"],
   "batch_size": 256,
-  "threads": 1
+  "threads": 1,
+  "include_sparse": true,
+  "include_dense": true
 }
 ```
 
@@ -58,12 +86,14 @@ Authorization: Bearer your_api_key_here
 **Response:**
 ```json
 {
-  "vectors": [
-    {
-      "indices": [123, 456],
-      "values": [0.5, 0.3]
-    }
-  ]
+  "sparse_vectors": [
+    {"indices": [123, 456], "values": [0.5, 0.3]}
+  ],
+  "dense_vectors": [
+    [0.1, 0.2, 0.3, ...]
+  ],
+  "dense_model": "BAAI/bge-small-en-v1.5",
+  "dense_dimensions": 384
 }
 ```
 
@@ -72,7 +102,11 @@ Authorization: Bearer your_api_key_here
 ### Using Docker Compose (Recommended)
 
 ```bash
+# Sparse-only mode (default)
 docker-compose up -d
+
+# Enable dense embeddings
+ENABLE_DENSE=true DENSE_MODEL=BAAI/bge-small-en-v1.5 docker-compose up -d
 ```
 
 ### Using Docker directly
@@ -90,12 +124,45 @@ docker run -d \
   bm25-api
 ```
 
-## Configuration
+## Environment Variables Configuration
 
-All settings are configurable via environment variables. Create a `.env` file or modify `docker-compose.yml`:
+All settings are configurable via environment variables. Create a `.env` file or set them directly:
 
-### Security Settings
-- `API_KEY`: Optional Bearer token for API authentication (default: none - no auth required)
+### 🔧 **Core Settings**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_DENSE` | `false` | Enable dense embeddings (`true`/`false`) |
+| `DENSE_MODEL` | `BAAI/bge-small-en-v1.5` | Dense model to use (when enabled) |
+| `API_KEY` | - | Optional Bearer token for authentication |
+| `HOST_PORT` | `8080` | External port mapping |
+| `MEMORY_LIMIT` | `600M` | Container memory limit |
+
+### 🎛️ **Application Settings**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BATCH_SIZE_DEFAULT` | `256` | Default embedding batch size |
+| `THREADS_DEFAULT` | `1` | Default thread count |
+| `WORKERS` | `1` | Uvicorn worker processes |
+| `LOG_LEVEL` | `info` | Log level (debug/info/warning/error) |
+
+### 🧠 **Dense Model Options**
+
+| Model | Dimensions | Size | Languages | Best For |
+|-------|------------|------|-----------|----------|
+| `BAAI/bge-small-en-v1.5` | 384 | 130MB | English | Fast, general purpose |
+| `BAAI/bge-base-en-v1.5` | 768 | 440MB | English | Higher accuracy |
+| `intfloat/multilingual-e5-large` | 1024 | 2.2GB | 100+ langs | Multilingual production |
+| `sentence-transformers/all-MiniLM-L6-v2` | 384 | 90MB | English | Very fast |
+
+### 📊 **Resource Planning**
+
+| Mode | `ENABLE_DENSE` | `MEMORY_LIMIT` | Recommended Use |
+|------|---------------|----------------|-----------------|
+| **Sparse-Only** | `false` | `600M` | BM25/keyword search, minimal resources |
+| **Small Dense** | `true` + bge-small | `1200M` | Hybrid search, balanced performance |
+| **Large Dense** | `true` + e5-large | `3G` | Production multilingual, maximum accuracy |
 
 ### Docker Configuration
 - `CONTAINER_NAME`: Container name (default: `bm25-api`)
@@ -136,14 +203,94 @@ All settings are configurable via environment variables. Create a `.env` file or
 - `HEALTH_CHECK_RETRIES`: Health check retries (default: `5`)
 - `HEALTH_CHECK_START_PERIOD`: Grace period before health checks (default: `10s`)
 
-### Example Configuration
+## 🚀 **Deployment Examples**
+
+### **Example 1: Sparse-Only (Minimal Resources)**
+```bash
+# Perfect for: BM25/keyword search, production efficiency, limited resources
+# Memory: ~119MB, Startup: 5-10 seconds
+
+docker-compose up -d
+
+# Verify deployment
+curl http://localhost:8080/health
+# Expected: {"status": "healthy", "models": {"sparse": {"status": "ready"}, "dense": {"status": "disabled"}}}
+```
+
+### **Example 2: Hybrid with Small Model (Balanced)**
+```bash
+# Perfect for: Development, balanced performance, English content
+# Memory: ~1.2GB, Startup: 30-60 seconds
+
+ENABLE_DENSE=true DENSE_MODEL=BAAI/bge-small-en-v1.5 MEMORY_LIMIT=1200M docker-compose up -d
+
+# Test hybrid search
+curl -X POST http://localhost:8080/hybrid/embed \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Hello world"], "include_sparse": true, "include_dense": true}'
+```
+
+### **Example 3: Production Multilingual (Maximum Quality)**
+```bash
+# Perfect for: Production, multilingual support, maximum accuracy
+# Memory: ~3GB, Startup: 60-120 seconds
+
+ENABLE_DENSE=true \
+DENSE_MODEL=intfloat/multilingual-e5-large \
+MEMORY_LIMIT=3G \
+CPU_LIMIT=4.0 \
+docker-compose up -d
+
+# Test with multiple languages
+curl -X POST http://localhost:8080/dense/embed \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Hello world", "Привет мир", "你好世界"]}'
+```
+
+### **Example 4: Secure Production Deployment**
+```bash
+# With API key authentication and optimized resources
+API_KEY=your_secret_production_key_here \
+ENABLE_DENSE=true \
+DENSE_MODEL=BAAI/bge-small-en-v1.5 \
+HOST_PORT=8081 \
+MEMORY_LIMIT=1500M \
+docker-compose up -d
+
+# Authenticated request
+curl -X POST http://localhost:8081/hybrid/embed \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_secret_production_key_here" \
+  -d '{"texts": ["Secure hybrid search"]}'
+```
+
+### **Using .env File**
 
 Copy `.env.example` to `.env` and customize:
 
 ```bash
 cp .env.example .env
-# Edit .env with your settings
+# Edit .env with your preferred settings
 docker-compose up -d
+```
+
+**Example .env for Hybrid Mode:**
+```env
+# Enable hybrid search
+ENABLE_DENSE=true
+DENSE_MODEL=BAAI/bge-small-en-v1.5
+
+# Security
+API_KEY=my_secure_api_key_123
+
+# Resources  
+HOST_PORT=8081
+MEMORY_LIMIT=1200M
+CPU_LIMIT=2.0
+
+# Performance
+BATCH_SIZE_DEFAULT=128
+WORKERS=1
 ```
 
 ## Integration with Qdrant
@@ -214,18 +361,70 @@ client.upsert("my_collection", points)
 }
 ```
 
-## Performance
+## Performance & Memory Usage
 
-- First request downloads and caches the BM25 model (~30MB)
-- Subsequent requests use cached model
-- Batch processing for efficiency
-- Thread limiting prevents resource exhaustion
+### Sparse-Only Mode (Default)
+- **Memory:** ~400-600MB
+- **Model:** BM25 (~30MB)
+- **Startup:** Fast (~5-10 seconds)
+- **No wasted resources** - Dense models NOT loaded when `ENABLE_DENSE=false`
+
+### With Dense Embeddings
+- **Small model (bge-small):** ~800-1200MB
+- **Large model (e5-large):** ~2-3GB
+- **Startup:** Slower (30-60 seconds first time)
+- **Recommendation:** Set appropriate `MEMORY_LIMIT` in docker-compose
+
+### Optimization Tips
+```bash
+# Sparse-only (minimal memory)
+docker-compose up -d
+
+# With small dense model
+ENABLE_DENSE=true DENSE_MODEL=BAAI/bge-small-en-v1.5 MEMORY_LIMIT=1200M docker-compose up -d
+
+# With large multilingual model
+ENABLE_DENSE=true DENSE_MODEL=intfloat/multilingual-e5-large MEMORY_LIMIT=3G docker-compose up -d
+```
 
 ## Requirements
 
 - Docker & Docker Compose
 - 600MB RAM minimum
 - 1GB disk space (including model cache)
+
+## 📝 **Quick Reference**
+
+### **Choose Your Mode**
+
+| Need | Mode | Command |
+|------|------|---------|
+| **Keyword search only** | Sparse | `docker-compose up -d` |
+| **Semantic search only** | Dense | `ENABLE_DENSE=true docker-compose up -d` |
+| **Best of both worlds** | Hybrid | `ENABLE_DENSE=true docker-compose up -d` |
+| **Multilingual production** | Hybrid + Large | `ENABLE_DENSE=true DENSE_MODEL=intfloat/multilingual-e5-large MEMORY_LIMIT=3G docker-compose up -d` |
+
+### **Key Endpoints**
+
+| Endpoint | Available When | Purpose |
+|----------|----------------|---------|
+| `/sparse/bm25` | Always | BM25 sparse vectors for keyword search |
+| `/dense/embed` | `ENABLE_DENSE=true` | Dense vectors for semantic search |
+| `/hybrid/embed` | `ENABLE_DENSE=true` | Both vector types in one call |
+| `/health` | Always | Check model status and health |
+
+### **Memory Usage Guide**
+
+- **119MB**: Sparse-only (verified)
+- **~1.2GB**: Hybrid with small model
+- **~3GB**: Hybrid with large multilingual model
+
+### **Troubleshooting**
+
+- **Out of Memory?** → Increase `MEMORY_LIMIT` or use smaller `DENSE_MODEL`
+- **Slow startup?** → Normal for dense models (30-60s first time)
+- **404 on dense endpoints?** → Check `ENABLE_DENSE=true` is set
+- **401 errors?** → Add `Authorization: Bearer <API_KEY>` header
 
 ## License
 

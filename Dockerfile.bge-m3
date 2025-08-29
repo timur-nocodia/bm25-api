@@ -6,28 +6,34 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     FASTEMBED_CACHE=/cache \
     HF_HOME=/cache \
-    OMP_NUM_THREADS=1 \
-    OPENBLAS_NUM_THREADS=1 \
-    MKL_NUM_THREADS=1
+    OMP_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2
 
 WORKDIR /app
 
-# Install build dependencies
+# Install system dependencies including build tools for potential compilations
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies including requests for health check
+# Install Python dependencies
 RUN pip install --no-cache-dir \
     fastapi==0.115.5 \
     uvicorn[standard]==0.32.1 \
     fastembed==0.3.4 \
+    FlagEmbedding \
+    torch \
+    numpy \
     requests
 
-# Copy application (choose which main file to use)
-COPY ${MAIN_FILE:-main.py} main.py
+# Copy application files
+COPY main_bge_m3.py main.py
 
-# Create cache directory
+# Create cache directory with proper permissions
 RUN mkdir -p /cache && chmod 777 /cache
 
 # Create non-root user for security
@@ -39,9 +45,9 @@ USER app
 # Expose port (configurable via environment)
 EXPOSE ${PORT:-8080}
 
-# Health check (will be overridden by docker-compose)
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=5 \
-    CMD python -c "import requests; requests.get('http://localhost:${PORT:-8080}/health', timeout=3)" || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:${PORT:-8080}/health', timeout=5)" || exit 1
 
 # Use environment variables for all settings
 CMD uvicorn main:app \

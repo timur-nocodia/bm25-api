@@ -1,12 +1,20 @@
 services:
-  bm25-api:
-    build: .
-    container_name: ${CONTAINER_NAME:-bm25-api}
+  hybrid-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile.hybrid
+    container_name: ${CONTAINER_NAME:-hybrid-api}
     ports:
       - "0.0.0.0:${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
     volumes:
-      - bm25_cache:${CACHE_PATH:-/cache}
+      - hybrid_cache:${CACHE_PATH:-/cache}
     environment:
+      # Mode selection (sparse or hybrid)
+      - MODE=${MODE:-hybrid}
+      
+      # Dense model selection
+      - DENSE_MODEL=${DENSE_MODEL:-BAAI/bge-small-en-v1.5}
+      
       # Cache settings
       - FASTEMBED_CACHE=${CACHE_PATH:-/cache}
       - HF_HOME=${CACHE_PATH:-/cache}
@@ -25,10 +33,6 @@ services:
       - THREADS_DEFAULT=${THREADS_DEFAULT:-1}
       - API_KEY=${API_KEY:-}
       
-      # Dense embedding settings (optional)
-      - DENSE_MODEL=${DENSE_MODEL:-}
-      - ENABLE_DENSE=${ENABLE_DENSE:-false}
-      
       # Python settings
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
@@ -42,20 +46,17 @@ services:
       interval: ${HEALTH_CHECK_INTERVAL:-30s}
       timeout: ${HEALTH_CHECK_TIMEOUT:-5s}
       retries: ${HEALTH_CHECK_RETRIES:-5}
-      start_period: ${HEALTH_CHECK_START_PERIOD:-10s}
+      start_period: ${HEALTH_CHECK_START_PERIOD:-30s}
     
-    # Resource limits (adjust based on ENABLE_DENSE)
-    # Sparse-only: ~400-600MB
-    # With dense (small model): ~800-1200MB  
-    # With dense (large model): ~2-3GB
+    # Resource limits (increased for dual models)
     deploy:
       resources:
         limits:
-          cpus: "${CPU_LIMIT:-1.5}"
-          memory: ${MEMORY_LIMIT:-600M}
+          cpus: "${CPU_LIMIT:-2.0}"
+          memory: ${MEMORY_LIMIT:-1200M}
         reservations:
-          cpus: "${CPU_RESERVATION:-0.5}"
-          memory: ${MEMORY_RESERVATION:-256M}
+          cpus: "${CPU_RESERVATION:-1.0}"
+          memory: ${MEMORY_RESERVATION:-512M}
       restart_policy:
         condition: ${RESTART_CONDITION:-any}
         delay: ${RESTART_DELAY:-5s}
@@ -63,5 +64,5 @@ services:
         window: ${RESTART_WINDOW:-120s}
 
 volumes:
-  bm25_cache:
+  hybrid_cache:
     driver: local

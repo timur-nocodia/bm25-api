@@ -1,18 +1,15 @@
 import os
-from typing import List, Optional
+from typing import List, Optional, Literal
 from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from fastembed import SparseTextEmbedding
+from fastembed import SparseTextEmbedding, TextEmbedding
 
 # Configuration from environment variables
 BATCH_SIZE_DEFAULT = int(os.getenv("BATCH_SIZE_DEFAULT", "256"))
 THREADS_DEFAULT = int(os.getenv("THREADS_DEFAULT", "1"))
 API_KEY = os.getenv("API_KEY", None)  # Optional API key for security
-
-# Optional dense embedding configuration
-ENABLE_DENSE = os.getenv("ENABLE_DENSE", "false").lower() == "true"
-DENSE_MODEL = os.getenv("DENSE_MODEL", "BAAI/bge-small-en-v1.5")
+DENSE_MODEL = os.getenv("DENSE_MODEL", "BAAI/bge-small-en-v1.5")  # Default dense model
 
 # Security setup
 security = HTTPBearer(auto_error=False)
@@ -31,51 +28,26 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security
     return True
 
 app = FastAPI(
-    title="BM25 Sparse Vector API" + (" + Dense Embeddings" if ENABLE_DENSE else ""),
-    description="FastEmbed-powered BM25 sparse vector generation service" + (" with optional dense embeddings" if ENABLE_DENSE else ""),
-    version="1.1.0"
+    title="Hybrid Vector API",
+    description="FastEmbed-powered sparse (BM25) and dense vector generation service",
+    version="2.0.0"
 )
 
-# Initialize sparse model (always required)
+# Initialize models with error handling
 try:
     sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
-    print("Sparse BM25 model loaded successfully")
+    print(f"Sparse BM25 model loaded successfully")
 except Exception as e:
     print(f"Failed to initialize BM25 model: {e}")
     raise
 
-# Initialize dense model (optional - only import when needed)
-dense_model = None
-if ENABLE_DENSE:
-    try:
-        # Only import TextEmbedding when actually needed
-        from fastembed import TextEmbedding
-        
-        dense_model = TextEmbedding(model_name=DENSE_MODEL)
-        print(f"Dense model '{DENSE_MODEL}' loaded successfully")
-        
-        # Get dimensions using model metadata
-        try:
-            model_info = next(m for m in TextEmbedding.list_supported_models() if m['model'] == DENSE_MODEL)
-            dense_model._dim = model_info['dim']
-            print(f"Model dimensions: {model_info['dim']}")
-        except (StopIteration, KeyError):
-            # Fallback: test embedding to get dimensions
-            test_embed = list(dense_model.embed(["test"], batch_size=1))
-            dense_model._dim = len(test_embed[0])
-            print(f"Model dimensions (detected): {dense_model._dim}")
-            
-    except ImportError as e:
-        print(f"Failed to import TextEmbedding: {e}")
-        print("Dense embeddings will not be available")
-        dense_model = None
-    except Exception as e:
-        print(f"Failed to initialize dense model '{DENSE_MODEL}': {e}")
-        print("Dense embeddings will not be available")
-        dense_model = None
-else:
-    print("Dense embeddings disabled (ENABLE_DENSE=false)")
-    print("Memory optimized - dense models not loaded")
+try:
+    dense_model = TextEmbedding(model_name=DENSE_MODEL)
+    print(f"Dense model '{DENSE_MODEL}' loaded successfully")
+except Exception as e:
+    print(f"Failed to initialize dense model '{DENSE_MODEL}': {e}")
+    print("Dense embeddings will not be available")
+    dense_model = None
 
 class EmbedRequest(BaseModel):
     texts: List[str]
@@ -83,7 +55,7 @@ class EmbedRequest(BaseModel):
     threads: Optional[int] = THREADS_DEFAULT
     avg_len: Optional[float] = None  # For Qdrant BM25 compatibility
 
-class HybridRequest(BaseModel):
+class HybridEmbedRequest(BaseModel):
     texts: List[str]
     batch_size: Optional[int] = BATCH_SIZE_DEFAULT
     threads: Optional[int] = THREADS_DEFAULT
@@ -95,16 +67,16 @@ class SparseVec(BaseModel):
     indices: List[int]
     values: List[float]
 
-class EmbedResponse(BaseModel):
+class SparseEmbedResponse(BaseModel):
     vectors: List[SparseVec]
-    avg_len: Optional[float] = None  # For Qdrant BM25 integration
+    avg_len: Optional[float] = None
 
-class DenseResponse(BaseModel):
+class DenseEmbedResponse(BaseModel):
     vectors: List[List[float]]
     model: str
     dimensions: int
 
-class HybridResponse(BaseModel):
+class HybridEmbedResponse(BaseModel):
     sparse_vectors: Optional[List[SparseVec]] = None
     dense_vectors: Optional[List[List[float]]] = None
     avg_len: Optional[float] = None
@@ -129,30 +101,24 @@ def health():
             "status": "error",
             "error": str(e)
         }
-        status["status"] = "partial"
     
-    # Check dense model if enabled
-    if ENABLE_DENSE:
-        if dense_model:
-            try:
-                test_dense = dense_model.embed(["test"], batch_size=1, threads=1)
-                next(test_dense)
-                status["models"]["dense"] = {
-                    "status": "ready",
-                    "model": DENSE_MODEL,
-                    "dimensions": getattr(dense_model, '_dim', 0)
-                }
-            except Exception as e:
-                status["models"]["dense"] = {
-                    "status": "error",
-                    "error": str(e)
-                }
-                status["status"] = "partial"
-        else:
-            status["models"]["dense"] = {"status": "not_loaded"}
-            status["status"] = "partial"
+    # Check dense model
+    if dense_model:
+        try:
+            test_dense = dense_model.embed(["test"], batch_size=1, threads=1)
+            next(test_dense)
+            status["models"]["dense"] = {
+                "status": "ready",
+                "model": DENSE_MODEL,
+                "dimensions": dense_model.dim
+            }
+        except Exception as e:
+            status["models"]["dense"] = {
+                "status": "error",
+                "error": str(e)
+            }
     else:
-        status["models"]["dense"] = {"status": "disabled"}
+        status["models"]["dense"] = {"status": "not_loaded"}
     
     return status
 
@@ -162,23 +128,18 @@ def root():
     endpoints = {
         "health": "/health",
         "sparse_bm25": "/sparse/bm25",
-        "documentation": "/docs"
+        "list_dense_models": "/dense/models"
     }
     
-    if ENABLE_DENSE and dense_model:
-        endpoints["dense_embed"] = "/dense/embed"
-        endpoints["hybrid_embed"] = "/hybrid/embed"
+    if dense_model:
+        endpoints["dense_embeddings"] = "/dense/embed"
+        endpoints["hybrid_embeddings"] = "/hybrid/embed"
     
     return {
-        "service": "BM25 Sparse Vector API" + (" + Dense Embeddings" if ENABLE_DENSE else ""),
-        "version": "1.1.0",
-        "features": {
-            "sparse_embeddings": True,
-            "dense_embeddings": ENABLE_DENSE and dense_model is not None,
-            "hybrid_search": ENABLE_DENSE and dense_model is not None,
-            "authentication": API_KEY is not None and API_KEY != ""
-        },
-        "endpoints": endpoints
+        "service": "Hybrid Vector API",
+        "version": "2.0.0",
+        "endpoints": endpoints,
+        "documentation": "/docs"
     }
 
 def calculate_avg_length(texts: List[str]) -> float:
@@ -188,7 +149,7 @@ def calculate_avg_length(texts: List[str]) -> float:
     total_words = sum(len(text.split()) for text in texts)
     return total_words / len(texts)
 
-@app.post("/sparse/bm25", response_model=EmbedResponse)
+@app.post("/sparse/bm25", response_model=SparseEmbedResponse)
 def sparse_bm25(req: EmbedRequest, authorized: bool = Depends(verify_api_key)):
     """Generate BM25 sparse vectors for input texts"""
     try:
@@ -201,19 +162,41 @@ def sparse_bm25(req: EmbedRequest, authorized: bool = Depends(verify_api_key)):
         for e in embeddings:
             out.append({"indices": e.indices.tolist(), "values": e.values.tolist()})
         
-        # Calculate or use provided avg_len for Qdrant integration
         avg_len = req.avg_len if req.avg_len is not None else calculate_avg_length(req.texts)
         
         return {"vectors": out, "avg_len": avg_len}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate sparse embeddings: {str(e)}")
 
-@app.post("/dense/embed", response_model=DenseResponse)
+@app.get("/dense/models")
+def list_dense_models(authorized: bool = Depends(verify_api_key)):
+    """List available dense embedding models"""
+    try:
+        models = TextEmbedding.list_supported_models()
+        # Return simplified model info
+        return {
+            "current_model": DENSE_MODEL if dense_model else None,
+            "available_models": [
+                {
+                    "name": m["model"],
+                    "dimensions": m["dim"],
+                    "size_gb": m.get("size_in_GB", "N/A"),
+                    "license": m.get("license", "N/A")
+                }
+                for m in models[:20]  # Return first 20 models
+            ],
+            "recommended": [
+                "BAAI/bge-small-en-v1.5",
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "BAAI/bge-base-en-v1.5"
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+
+@app.post("/dense/embed", response_model=DenseEmbedResponse)
 def dense_embed(req: EmbedRequest, authorized: bool = Depends(verify_api_key)):
-    """Generate dense embeddings (only available when ENABLE_DENSE=true)"""
-    if not ENABLE_DENSE:
-        raise HTTPException(status_code=404, detail="Dense embeddings disabled. Set ENABLE_DENSE=true to enable.")
-    
+    """Generate dense embeddings for input texts"""
     if not dense_model:
         raise HTTPException(status_code=503, detail="Dense model not available")
     
@@ -228,21 +211,15 @@ def dense_embed(req: EmbedRequest, authorized: bool = Depends(verify_api_key)):
         return {
             "vectors": vectors,
             "model": DENSE_MODEL,
-            "dimensions": getattr(dense_model, '_dim', 0)
+            "dimensions": dense_model.dim
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate dense embeddings: {str(e)}")
 
-@app.post("/hybrid/embed", response_model=HybridResponse)
-def hybrid_embed(req: HybridRequest, authorized: bool = Depends(verify_api_key)):
-    """Generate both sparse and dense embeddings (only available when ENABLE_DENSE=true)"""
-    if not ENABLE_DENSE:
-        raise HTTPException(status_code=404, detail="Hybrid embeddings disabled. Set ENABLE_DENSE=true to enable.")
-    
-    response_data = {
-        "dense_model": DENSE_MODEL if dense_model else None,
-        "dense_dimensions": getattr(dense_model, '_dim', 0) if dense_model else 0
-    }
+@app.post("/hybrid/embed", response_model=HybridEmbedResponse)
+def hybrid_embed(req: HybridEmbedRequest, authorized: bool = Depends(verify_api_key)):
+    """Generate both sparse and dense embeddings for hybrid search"""
+    response = {}
     
     # Generate sparse embeddings if requested
     if req.include_sparse:
@@ -256,8 +233,8 @@ def hybrid_embed(req: HybridRequest, authorized: bool = Depends(verify_api_key))
             for e in sparse_embeddings:
                 sparse_vecs.append({"indices": e.indices.tolist(), "values": e.values.tolist()})
             
-            response_data["sparse_vectors"] = sparse_vecs
-            response_data["avg_len"] = req.avg_len if req.avg_len is not None else calculate_avg_length(req.texts)
+            response["sparse_vectors"] = sparse_vecs
+            response["avg_len"] = req.avg_len if req.avg_len is not None else calculate_avg_length(req.texts)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate sparse embeddings: {str(e)}")
     
@@ -265,7 +242,8 @@ def hybrid_embed(req: HybridRequest, authorized: bool = Depends(verify_api_key))
     if req.include_dense:
         if not dense_model:
             if req.include_sparse:
-                return response_data  # Return partial response with only sparse
+                # Return partial response with only sparse
+                return response
             else:
                 raise HTTPException(status_code=503, detail="Dense model not available")
         
@@ -275,8 +253,10 @@ def hybrid_embed(req: HybridRequest, authorized: bool = Depends(verify_api_key))
                 batch_size=req.batch_size,
                 threads=req.threads
             )
-            response_data["dense_vectors"] = [e.tolist() for e in dense_embeddings]
+            response["dense_vectors"] = [e.tolist() for e in dense_embeddings]
+            response["dense_model"] = DENSE_MODEL
+            response["dense_dimensions"] = dense_model.dim
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate dense embeddings: {str(e)}")
     
-    return response_data
+    return response

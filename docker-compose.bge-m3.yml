@@ -1,0 +1,67 @@
+services:
+  bge-m3-api:
+    build: 
+      context: .
+      dockerfile: Dockerfile.bge-m3
+    container_name: ${CONTAINER_NAME:-bge-m3-api}
+    ports:
+      - "0.0.0.0:${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
+    volumes:
+      - bge_m3_cache:${CACHE_PATH:-/cache}
+    environment:
+      # BGE-M3 Configuration
+      - USE_BGE_M3=${USE_BGE_M3:-true}
+      - DENSE_MODEL=${DENSE_MODEL:-BAAI/bge-m3}
+      - USE_FP16=${USE_FP16:-false}  # Set to true for GPU or if you want to save memory
+      
+      # Cache settings
+      - FASTEMBED_CACHE=${CACHE_PATH:-/cache}
+      - HF_HOME=${CACHE_PATH:-/cache}
+      
+      # Performance settings (increased for BGE-M3)
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+      
+      # Application settings
+      - HOST=${APP_HOST:-0.0.0.0}
+      - PORT=${CONTAINER_PORT:-8080}
+      - WORKERS=${WORKERS:-1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - BATCH_SIZE_DEFAULT=${BATCH_SIZE_DEFAULT:-32}  # Smaller batch for BGE-M3
+      - THREADS_DEFAULT=${THREADS_DEFAULT:-1}
+      - API_KEY=${API_KEY:-}
+      
+      # Python settings
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PIP_NO_CACHE_DIR=1
+    
+    restart: ${RESTART_POLICY:-always}
+    
+    # Health check with longer intervals for BGE-M3
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${CONTAINER_PORT:-8080}/health', timeout=5)"]
+      interval: ${HEALTH_CHECK_INTERVAL:-60s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
+      retries: ${HEALTH_CHECK_RETRIES:-3}
+      start_period: ${HEALTH_CHECK_START_PERIOD:-120s}  # Longer startup time for model loading
+    
+    # Resource limits (significantly increased for BGE-M3)
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-4.0}"
+          memory: ${MEMORY_LIMIT:-4G}
+        reservations:
+          cpus: "${CPU_RESERVATION:-2.0}"
+          memory: ${MEMORY_RESERVATION:-2G}
+      restart_policy:
+        condition: ${RESTART_CONDITION:-any}
+        delay: ${RESTART_DELAY:-10s}
+        max_attempts: ${RESTART_MAX_ATTEMPTS:-0}
+        window: ${RESTART_WINDOW:-180s}
+
+volumes:
+  bge_m3_cache:
+    driver: local

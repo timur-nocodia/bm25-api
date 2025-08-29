@@ -1,0 +1,63 @@
+services:
+  multilingual-api:
+    build: .
+    container_name: ${CONTAINER_NAME:-multilingual-api}
+    ports:
+      - "0.0.0.0:${HOST_PORT:-8081}:${CONTAINER_PORT:-8080}"
+    volumes:
+      - multilingual_cache:${CACHE_PATH:-/cache}
+    environment:
+      # Multilingual model configuration
+      - DENSE_MODEL=${DENSE_MODEL:-intfloat/multilingual-e5-large}
+      
+      # Cache settings
+      - FASTEMBED_CACHE=${CACHE_PATH:-/cache}
+      - HF_HOME=${CACHE_PATH:-/cache}
+      
+      # Performance settings
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+      
+      # Application settings
+      - HOST=${APP_HOST:-0.0.0.0}
+      - PORT=${CONTAINER_PORT:-8080}
+      - WORKERS=${WORKERS:-1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - BATCH_SIZE_DEFAULT=${BATCH_SIZE_DEFAULT:-64}
+      - THREADS_DEFAULT=${THREADS_DEFAULT:-1}
+      - API_KEY=${API_KEY:-}
+      
+      # Python settings
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PIP_NO_CACHE_DIR=1
+    
+    restart: ${RESTART_POLICY:-always}
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${CONTAINER_PORT:-8080}/health', timeout=5)"]
+      interval: ${HEALTH_CHECK_INTERVAL:-45s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
+      retries: ${HEALTH_CHECK_RETRIES:-3}
+      start_period: ${HEALTH_CHECK_START_PERIOD:-60s}
+    
+    # Resource limits (increased for large multilingual model)
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-3.0}"
+          memory: ${MEMORY_LIMIT:-3G}
+        reservations:
+          cpus: "${CPU_RESERVATION:-1.5}"
+          memory: ${MEMORY_RESERVATION:-1G}
+      restart_policy:
+        condition: ${RESTART_CONDITION:-any}
+        delay: ${RESTART_DELAY:-5s}
+        max_attempts: ${RESTART_MAX_ATTEMPTS:-0}
+        window: ${RESTART_WINDOW:-120s}
+
+volumes:
+  multilingual_cache:
+    driver: local
