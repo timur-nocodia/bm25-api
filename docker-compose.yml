@@ -1,0 +1,24 @@
+services:
+  bm25-api:
+    build: .
+    container_name: bm25-api
+    ports:
+      - "8080:8080"
+    volumes:
+      - bm25_cache:/cache
+    environment:
+      - FASTEMBED_CACHE=/cache
+      - HF_HOME=/cache
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 600M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+
+volumes:
+  bm25_cache:
+    driver: local
