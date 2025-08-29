@@ -23,6 +23,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - BATCH_SIZE_DEFAULT=${BATCH_SIZE_DEFAULT:-256}
       - THREADS_DEFAULT=${THREADS_DEFAULT:-1}
+      - API_KEY=${API_KEY:-}
       
       # Python settings
       - PYTHONDONTWRITEBYTECODE=1

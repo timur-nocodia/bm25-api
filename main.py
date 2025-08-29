@@ -1,12 +1,30 @@
 import os
 from typing import List, Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Security, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from fastembed import SparseTextEmbedding
 
 # Configuration from environment variables
 BATCH_SIZE_DEFAULT = int(os.getenv("BATCH_SIZE_DEFAULT", "256"))
 THREADS_DEFAULT = int(os.getenv("THREADS_DEFAULT", "1"))
+API_KEY = os.getenv("API_KEY", None)  # Optional API key for security
+
+# Security setup
+security = HTTPBearer(auto_error=False)
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    """Verify API key if configured"""
+    if API_KEY is None or API_KEY == "":
+        return True  # No API key required
+    
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    
+    if credentials.credentials != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    return True
 
 app = FastAPI(
     title="BM25 Sparse Vector API",
@@ -75,7 +93,7 @@ def calculate_avg_length(texts: List[str]) -> float:
     return total_words / len(texts)
 
 @app.post("/sparse/bm25", response_model=EmbedResponse)
-def sparse_bm25(req: EmbedRequest):
+def sparse_bm25(req: EmbedRequest, authorized: bool = Depends(verify_api_key)):
     """Generate BM25 sparse vectors for input texts"""
     try:
         embeddings = model.embed(

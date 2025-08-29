@@ -50,6 +50,11 @@ Generate BM25 sparse vectors
 }
 ```
 
+**Headers (when API key is configured):**
+```
+Authorization: Bearer your_api_key_here
+```
+
 **Response:**
 ```json
 {
@@ -88,6 +93,9 @@ docker run -d \
 ## Configuration
 
 All settings are configurable via environment variables. Create a `.env` file or modify `docker-compose.yml`:
+
+### Security Settings
+- `API_KEY`: Optional Bearer token for API authentication (default: none - no auth required)
 
 ### Docker Configuration
 - `CONTAINER_NAME`: Container name (default: `bm25-api`)
@@ -168,10 +176,12 @@ client.create_collection(
 ```python
 import requests
 
-# Get sparse vectors
+# Get sparse vectors (with optional API key)
+headers = {"Authorization": "Bearer your_api_key"} if api_key else {}
 response = requests.post(
     "http://localhost:8080/sparse/bm25",
-    json={"texts": documents, "batch_size": 256}
+    json={"texts": documents, "batch_size": 256},
+    headers=headers
 )
 sparse_vectors = response.json()["vectors"]
 
@@ -193,8 +203,9 @@ client.upsert("my_collection", points)
 
 1. **Method:** POST
 2. **URL:** `http://bm25-api:8080/sparse/bm25`
-3. **Body Type:** JSON
-4. **Body:**
+3. **Headers:** `Authorization: Bearer {{$env.API_KEY}}` (if API key is configured)
+4. **Body Type:** JSON
+5. **Body:**
 ```json
 {
   "texts": {{$json["documents"]}},
