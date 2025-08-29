@@ -9,7 +9,10 @@ Lightweight HTTP service for generating BM25 sparse vectors using FastEmbed. Des
 - 🐳 Production-ready Docker setup
 - 💾 Model caching for performance
 - 🔒 Resource-limited deployment
-- 🏥 Built-in health checks
+- 🏥 Built-in health checks with auto-restart
+- ⚙️ Fully configurable via environment variables
+- 🔄 Never-die policy with unlimited restart attempts
+- 👤 Non-root user execution for security
 
 ## Quick Start
 
@@ -84,21 +87,56 @@ docker run -d \
 
 ## Configuration
 
-### Environment Variables
+All settings are configurable via environment variables. Create a `.env` file or modify `docker-compose.yml`:
 
-- `FASTEMBED_CACHE`: Model cache directory (default: `/cache`)
-- `HF_HOME`: Hugging Face cache directory (default: `/cache`)
+### Docker Configuration
+- `CONTAINER_NAME`: Container name (default: `bm25-api`)
+- `HOST_PORT`: Host port mapping (default: `8080`)
+- `CONTAINER_PORT`: Container internal port (default: `8080`)
+- `CACHE_PATH`: Cache mount path (default: `/cache`)
+
+### Application Settings
+- `APP_HOST`: Application bind host (default: `0.0.0.0`)
+- `WORKERS`: Number of worker processes (default: `1`)
+- `LOG_LEVEL`: Log level - debug, info, warning, error (default: `info`)
+- `BATCH_SIZE_DEFAULT`: Default batch size for embeddings (default: `256`)
+- `THREADS_DEFAULT`: Default thread count (default: `1`)
+
+### Performance Tuning
 - `OMP_NUM_THREADS`: OpenMP threads limit (default: `1`)
 - `OPENBLAS_NUM_THREADS`: OpenBLAS threads limit (default: `1`)
 - `MKL_NUM_THREADS`: MKL threads limit (default: `1`)
 
+### Cache Settings
+- `FASTEMBED_CACHE`: Model cache directory (default: `/cache`)
+- `HF_HOME`: Hugging Face cache directory (default: `/cache`)
+
 ### Resource Limits
+- `CPU_LIMIT`: CPU cores limit (default: `1.5`)
+- `MEMORY_LIMIT`: Memory limit (default: `600M`)
+- `CPU_RESERVATION`: CPU cores reservation (default: `0.5`)
+- `MEMORY_RESERVATION`: Memory reservation (default: `256M`)
 
-Default limits in `docker-compose.yml`:
-- CPU: 1.5 cores max, 0.5 cores reserved
-- Memory: 600MB max, 256MB reserved
+### Restart & Health Check
+- `RESTART_POLICY`: Docker restart policy (default: `always`)
+- `RESTART_CONDITION`: Restart condition - none, on-failure, any (default: `any`)
+- `RESTART_DELAY`: Delay between restart attempts (default: `5s`)
+- `RESTART_MAX_ATTEMPTS`: Max restart attempts, 0=unlimited (default: `0`)
+- `RESTART_WINDOW`: Time window for restart attempts (default: `120s`)
+- `HEALTH_CHECK_INTERVAL`: Health check interval (default: `30s`)
+- `HEALTH_CHECK_TIMEOUT`: Health check timeout (default: `5s`)
+- `HEALTH_CHECK_RETRIES`: Health check retries (default: `5`)
+- `HEALTH_CHECK_START_PERIOD`: Grace period before health checks (default: `10s`)
 
-Adjust based on your requirements.
+### Example Configuration
+
+Copy `.env.example` to `.env` and customize:
+
+```bash
+cp .env.example .env
+# Edit .env with your settings
+docker-compose up -d
+```
 
 ## Integration with Qdrant
 

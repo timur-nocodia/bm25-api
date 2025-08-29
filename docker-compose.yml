@@ -1,23 +1,58 @@
 services:
   bm25-api:
     build: .
-    container_name: bm25-api
+    container_name: ${CONTAINER_NAME:-bm25-api}
     ports:
-      - "8080:8080"
+      - "${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
     volumes:
-      - bm25_cache:/cache
+      - bm25_cache:${CACHE_PATH:-/cache}
     environment:
-      - FASTEMBED_CACHE=/cache
-      - HF_HOME=/cache
-    restart: unless-stopped
+      # Cache settings
+      - FASTEMBED_CACHE=${CACHE_PATH:-/cache}
+      - HF_HOME=${CACHE_PATH:-/cache}
+      
+      # Performance settings
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
+      
+      # Application settings
+      - HOST=${APP_HOST:-0.0.0.0}
+      - PORT=${CONTAINER_PORT:-8080}
+      - WORKERS=${WORKERS:-1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - BATCH_SIZE_DEFAULT=${BATCH_SIZE_DEFAULT:-256}
+      - THREADS_DEFAULT=${THREADS_DEFAULT:-1}
+      
+      # Python settings
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      - PIP_NO_CACHE_DIR=1
+    
+    restart: ${RESTART_POLICY:-always}
+    
+    # Health check with configurable intervals
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:${CONTAINER_PORT:-8080}/health', timeout=3)"]
+      interval: ${HEALTH_CHECK_INTERVAL:-30s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-5s}
+      retries: ${HEALTH_CHECK_RETRIES:-5}
+      start_period: ${HEALTH_CHECK_START_PERIOD:-10s}
+    
+    # Resource limits
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 600M
+          cpus: "${CPU_LIMIT:-1.5}"
+          memory: ${MEMORY_LIMIT:-600M}
         reservations:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "${CPU_RESERVATION:-0.5}"
+          memory: ${MEMORY_RESERVATION:-256M}
+      restart_policy:
+        condition: ${RESTART_CONDITION:-any}
+        delay: ${RESTART_DELAY:-5s}
+        max_attempts: ${RESTART_MAX_ATTEMPTS:-0}
+        window: ${RESTART_WINDOW:-120s}
 
 volumes:
   bm25_cache:
