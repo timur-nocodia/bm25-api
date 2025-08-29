@@ -25,6 +25,7 @@ class EmbedRequest(BaseModel):
     texts: List[str]
     batch_size: Optional[int] = BATCH_SIZE_DEFAULT
     threads: Optional[int] = THREADS_DEFAULT
+    avg_len: Optional[float] = None  # For Qdrant BM25 compatibility
 
 class SparseVec(BaseModel):
     indices: List[int]
@@ -32,6 +33,7 @@ class SparseVec(BaseModel):
 
 class EmbedResponse(BaseModel):
     vectors: List[SparseVec]
+    avg_len: Optional[float] = None  # For Qdrant BM25 integration
 
 @app.get("/health")
 def health():
@@ -65,6 +67,13 @@ def root():
         "documentation": "/docs"
     }
 
+def calculate_avg_length(texts: List[str]) -> float:
+    """Calculate average word length for BM25 parameter"""
+    if not texts:
+        return 0.0
+    total_words = sum(len(text.split()) for text in texts)
+    return total_words / len(texts)
+
 @app.post("/sparse/bm25", response_model=EmbedResponse)
 def sparse_bm25(req: EmbedRequest):
     """Generate BM25 sparse vectors for input texts"""
@@ -77,6 +86,10 @@ def sparse_bm25(req: EmbedRequest):
         out = []
         for e in embeddings:
             out.append({"indices": e.indices.tolist(), "values": e.values.tolist()})
-        return {"vectors": out}
+        
+        # Calculate or use provided avg_len for Qdrant integration
+        avg_len = req.avg_len if req.avg_len is not None else calculate_avg_length(req.texts)
+        
+        return {"vectors": out, "avg_len": avg_len}
     except Exception as e:
         raise Exception(f"Failed to generate embeddings: {str(e)}")

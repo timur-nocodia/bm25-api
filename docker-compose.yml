@@ -3,7 +3,7 @@ services:
     build: .
     container_name: ${CONTAINER_NAME:-bm25-api}
     ports:
-      - "${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
+      - "0.0.0.0:${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
     volumes:
       - bm25_cache:${CACHE_PATH:-/cache}
     environment:
